@@ -5,8 +5,8 @@ Nothing leaves your machine: text extraction, OCR and classification all run on-
 
 It works in two steps, so nothing moves without your review:
 
-1. **plan**: reads each file, asks the model for a category and a clean filename, and writes `plan.csv`
-2. **apply**: moves the files according to `plan.csv`, after you've reviewed and edited it
+1. **plan**: reads each file, asks the model for a category and a clean filename, and writes a plan to `runs/`
+2. **apply**: moves the files according to that plan, after you've reviewed and edited it
 
 ## Requirements
 
@@ -51,16 +51,21 @@ Then edit `config.toml` (it's gitignored, so your settings never get committed):
 ```bash
 # 1. Plan: scan one or more folders (moves nothing)
 uv run organize.py plan ~/Downloads ~/Desktop "~/My Drive"
+#    -> writes runs/plan-20260926-165700.csv
 
-# 2. Review plan.csv (see below)
+# 2. Review the plan (see below)
 
-# 3. Apply
+# 3. Apply the latest plan...
 uv run organize.py apply
+#    ...or a specific one
+uv run organize.py apply runs/plan-20260926-165700.csv
 ```
 
 Use `--into <folder>` to override the destination for one run, e.g. to test on a scratch folder.
 
-### Reviewing plan.csv
+Every run gets its own timestamped file in `runs/` (next to the script), so nothing is ever overwritten: `plan-<timestamp>.csv` for each plan and `undo-<timestamp>.csv` for each apply that moved something.
+
+### Reviewing a plan
 
 | Column | Meaning |
 |---|---|
@@ -72,7 +77,7 @@ Use `--into <folder>` to override the destination for one run, e.g. to test on a
 | `note` | Why a row was skipped, or which file a duplicate matches. |
 
 Existing files are never overwritten: a `-1`, `-2`… suffix is added.
-Every move is appended to `undo.csv` (`new path, original path`) so you can revert by hand.
+Each apply writes its moves to its own `runs/undo-<timestamp>.csv` (`new_path, original_path`), so you can revert any run by hand. Applying the same plan twice is safe: rows whose source is already gone are skipped.
 
 ## What gets scanned
 
@@ -99,4 +104,4 @@ Install Google Drive for desktop and set **Settings → Preferences → Folders 
 ## Privacy
 
 - The model runs through Ollama on `localhost`. No API keys, no cloud calls.
-- `config.toml`, `plan.csv` and `undo.csv` contain your categories, file paths and names. They're all gitignored.
+- `config.toml` and everything in `runs/` contain your categories, file paths and names. They're all gitignored.

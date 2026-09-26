@@ -13,13 +13,15 @@
 """
 Local AI file organizer (Ollama). Nothing leaves your machine.
 
-  uv run organize.py plan ~/Downloads ~/Desktop "~/My Drive"   # writes plan.csv, moves nothing
-  # -> review plan.csv: edit dest/category, set action to "skip" for rows to leave alone
-  uv run organize.py apply                                      # executes plan.csv, logs undo.csv
+  uv run organize.py plan ~/Downloads ~/Desktop "~/My Drive"   # writes runs/plan-<timestamp>.csv, moves nothing
+  # -> review the plan: edit dest/category, set action to "skip" for rows to leave alone
+  uv run organize.py apply                                      # executes the latest plan, logs runs/undo-<timestamp>.csv
+  uv run organize.py apply runs/plan-20260926-165700.csv        # or a specific plan
 
 Settings live in config.toml next to this script (start from config.example.toml).
 """
 import argparse, csv, hashlib, os, re, shutil, sys, tomllib
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -27,7 +29,7 @@ import ollama
 from pydantic import create_model
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
-PLAN, UNDO = Path("plan.csv"), Path("undo.csv")
+RUNS_DIR = Path(__file__).with_name("runs")  # plans and undo logs, one file per run
 PLAN_FIELDS = ["action", "src", "dest", "category", "suggested", "confidence", "note"]
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".heic", ".tiff", ".tif"}
@@ -85,8 +87,16 @@ def iter_files(sources: list[Path], cfg: dict, sorted_dirs: set[Path]):
     """Yield files to sort. Skips hidden items, git repos, excluded names,
     app bundles and folders that are already sorted categories."""
     seen = set()
+
+    def warn(err: OSError):
+        print(f"  ! cannot read {err.filename}: {err.strerror}", file=sys.stderr)
+        if err.errno == 1:  # EPERM: macOS privacy protection
+            print("    Allow your terminal app in System Settings > Privacy & Security > "
+                  "Files & Folders (or Full Disk Access), then restart it.", file=sys.stderr)
+
     for src in sources:
-        for dirpath, dirnames, filenames in os.walk(src):
+        found = 0
+        for dirpath, dirnames, filenames in os.walk(src, onerror=warn):
             d = Path(dirpath)
             if ".git" in dirnames or ".git" in filenames or d in sorted_dirs or d in cfg["exclude_paths"]:
                 dirnames[:] = []  # code repo, already sorted or excluded: don't descend
@@ -99,7 +109,9 @@ def iter_files(sources: list[Path], cfg: dict, sorted_dirs: set[Path]):
                 f = d / name
                 if not name.startswith(".") and f not in seen:
                     seen.add(f)
+                    found += 1
                     yield f
+        print(f"Scanned {src}: {found} files", file=sys.stderr)
 
 
 class DuplicateFinder:
@@ -210,6 +222,26 @@ def safe_name(s: str) -> str:
     return re.sub(r"[^a-z0-9\-_]", "", s.lower().replace(" ", "-"))[:80] or "file"
 
 
+# ---- run files ------------------------------------------------------------
+
+def new_run_file(kind: str) -> Path:
+    """runs/<kind>-YYYYMMDD-HHMMSS.csv, with a -1, -2… suffix if that name is taken."""
+    RUNS_DIR.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path, n = RUNS_DIR / f"{kind}-{stamp}.csv", 1
+    while path.exists():
+        path = RUNS_DIR / f"{kind}-{stamp}-{n}.csv"; n += 1
+    return path
+
+
+def latest_plan() -> Path | None:
+    def key(p: Path):  # plan-DATE-TIME[-N]
+        parts = p.stem.split("-")
+        return parts[1], parts[2], int(parts[3]) if len(parts) > 3 else 0
+    plans = sorted(RUNS_DIR.glob("plan-*.csv"), key=key) if RUNS_DIR.exists() else []
+    return plans[-1] if plans else None
+
+
 # ---- commands -------------------------------------------------------------
 
 def plan(sources: list[Path], cfg: dict):
@@ -221,8 +253,9 @@ def plan(sources: list[Path], cfg: dict):
     finder = DuplicateFinder()
     index_sorted(sorted_dirs, finder)
     counts = {"move": 0, "duplicate": 0, "skip": 0, "inbox": 0}
+    plan_path = new_run_file("plan")
 
-    with open(PLAN, "w", newline="") as fh:
+    with open(plan_path, "x", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=PLAN_FIELDS)
         w.writeheader()
         for i, f in enumerate(files, 1):
@@ -262,46 +295,65 @@ def plan(sources: list[Path], cfg: dict):
             counts["move"] += 1
 
     print(
-        f"\nWrote {PLAN}: {counts['move']} to move ({counts['inbox']} to {cfg['inbox']}), "
+        f"\nWrote {plan_path}: {counts['move']} to move ({counts['inbox']} to {cfg['inbox']}), "
         f"{counts['duplicate']} duplicates, {counts['skip']} skipped.\n"
         "Review it, then run: uv run organize.py apply"
     )
 
 
-def apply():
-    if not PLAN.exists():
-        sys.exit("No plan.csv here. Run: uv run organize.py plan <folders>")
-    moved = 0
-    with open(PLAN, newline="") as fh, open(UNDO, "a", newline="") as undo:
-        log = csv.writer(undo)
-        for row in csv.DictReader(fh):
-            if row["action"] != "move" or not row["dest"]:
-                continue
-            src, dest = Path(row["src"]), Path(row["dest"])
-            if not src.exists() or src == dest:
-                continue
-            base, n = dest, 1
-            while dest.exists():  # never overwrite
-                dest = base.with_stem(f"{base.stem}-{n}"); n += 1
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(src, dest)
-            log.writerow([dest, src])
-            moved += 1
-            print(f"{src}  ->  {dest}")
-    print(f"\nMoved {moved} files. Each move is logged in {UNDO} (new path, original path).")
+def apply(plan_path: Path | None):
+    plan_path = plan_path or latest_plan()
+    if plan_path is None:
+        sys.exit("No plan found in runs/. Run: uv run organize.py plan <folders>")
+    if not plan_path.is_file():
+        sys.exit(f"Plan not found: {plan_path}")
+    print(f"Applying {plan_path}\n")
+
+    moved, undo_path, undo_fh, log = 0, None, None, None
+    try:
+        with open(plan_path, newline="") as fh:
+            for row in csv.DictReader(fh):
+                if row["action"] != "move" or not row["dest"]:
+                    continue
+                src, dest = Path(row["src"]), Path(row["dest"])
+                if not src.exists() or src == dest:
+                    continue
+                base, n = dest, 1
+                while dest.exists():  # never overwrite
+                    dest = base.with_stem(f"{base.stem}-{n}"); n += 1
+                if log is None:  # create the undo log only once something moves
+                    undo_path = new_run_file("undo")
+                    undo_fh = open(undo_path, "x", newline="")
+                    log = csv.writer(undo_fh)
+                    log.writerow(["new_path", "original_path"])
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(src, dest)
+                log.writerow([dest, src])
+                undo_fh.flush()  # keep the log accurate even if the run is interrupted
+                moved += 1
+                print(f"{src}  ->  {dest}")
+    finally:
+        if undo_fh:
+            undo_fh.close()
+
+    if moved:
+        print(f"\nMoved {moved} files. Undo log: {undo_path} (new path, original path).")
+    else:
+        print("Nothing to move: every 'move' row is already done or its source is gone.")
 
 
 def main():
     ap = argparse.ArgumentParser(description="Sort files into folders with a local LLM.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("plan", help="classify files and write plan.csv (moves nothing)")
+    p = sub.add_parser("plan", help="classify files and write runs/plan-<timestamp>.csv (moves nothing)")
     p.add_argument("sources", nargs="+", help="folders to scan")
     p.add_argument("--into", help="destination root (overrides config.toml)")
-    sub.add_parser("apply", help="execute plan.csv")
+    a = sub.add_parser("apply", help="execute a plan (the latest one by default)")
+    a.add_argument("plan", nargs="?", type=Path, help="plan file to apply (default: latest in runs/)")
     args = ap.parse_args()
 
     if args.cmd == "apply":
-        return apply()
+        return apply(args.plan)
     cfg = load_config()
     if args.into:
         cfg["root"] = expand(args.into)
