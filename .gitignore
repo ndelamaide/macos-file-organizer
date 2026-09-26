@@ -1,0 +1,12 @@
+# Personal config and data produced by the organizer
+config.toml
+plan.csv
+undo.csv
+
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+
+# macOS
+.DS_Store

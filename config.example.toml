@@ -1,0 +1,23 @@
+# Copy this file to config.toml and edit it.
+# config.toml is gitignored, so your categories stay private.
+
+# Local Ollama model. Never use a "-cloud" model: your files would leave the machine.
+model = "qwen3.5:9b"
+
+# Folders to sort into. The model can ONLY choose from this list.
+categories = [
+    "Admin",
+    "Finance",
+    "Work",
+    "Travel",
+    "Learning",
+    "Personal",
+    "Photos",
+    "Misc",
+]
+
+# Characters of each file's text sent to the model.
+max_chars = 3000
+
+# OCR languages for images, in order of preference (IETF BCP 47 codes).
+ocr_languages = ["fr-FR", "en-US"]
