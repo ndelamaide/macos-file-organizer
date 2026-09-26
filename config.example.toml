@@ -1,23 +1,52 @@
 # Copy this file to config.toml and edit it.
-# config.toml is gitignored, so your categories stay private.
+# config.toml is gitignored, so your categories and paths stay private.
 
-# Local Ollama model. Never use a "-cloud" model: your files would leave the machine.
+# Local Ollama model. Cloud models are refused: your files would leave the machine.
 model = "qwen3.5:9b"
-
-# Folders to sort into. The model can ONLY choose from this list.
-categories = [
-    "Admin",
-    "Finance",
-    "Work",
-    "Travel",
-    "Learning",
-    "Personal",
-    "Photos",
-    "Misc",
-]
 
 # Characters of each file's text sent to the model.
 max_chars = 3000
 
-# OCR languages for images, in order of preference (IETF BCP 47 codes).
+# OCR languages for images and scanned PDFs, in order of preference.
 ocr_languages = ["fr-FR", "en-US"]
+
+# Root folder for sorted files: each category becomes a subfolder here.
+# Point it at your mirrored Google Drive folder (check the exact path in Finder).
+destination = "~/My Drive"
+
+# Below this confidence, a file goes to the inbox category for you to decide.
+min_confidence = 0.6
+inbox = "Inbox"
+
+# Folder names never scanned. Folders containing a .git repo, hidden folders
+# and app bundles are always skipped, so code is never touched.
+exclude = ["node_modules", ".venv", "venv", "__pycache__", "Library", "Applications"]
+
+# Categories: "Folder/Subfolder" = "when to use it".
+# The model can only pick from these, and the descriptions are what it goes by:
+# make them specific, and say which folder wins in borderline cases.
+# Add a destination to send a category somewhere other than the root,
+# e.g. to keep sensitive documents off Google Drive.
+[categories]
+"Identity" = { description = "Passport, ID card, driving licence, residence permit, birth certificate", destination = "~/Documents/Private/Identity" }
+
+"Admin/Taxes-FR"      = "French taxes: déclaration de revenus, avis d'imposition, taxe foncière, taxe d'habitation"
+"Admin/Taxes-CH"      = "Swiss taxes: déclaration d'impôt, impôt à la source, salary tax certificates"
+"Admin/Government-FR" = "Other French administration: préfecture, mairie, CAF, URSSAF, official letters"
+"Admin/Government-CH" = "Other Swiss administration: commune, cantonal offices, AVS, official letters"
+"Admin/Insurance"     = "Insurance contracts and claims: health insurance (LAMal, mutuelle), home, car, liability"
+"Admin/Housing"       = "Leases, rent, utilities, internet and phone contracts"
+"Admin/Vehicle"       = "Car registration (carte grise), purchase, maintenance, fines"
+
+"Finance/Banking"   = "Bank and card statements, account opening or closing documents"
+"Finance/Invoices"  = "Receipts and invoices for purchases, warranties, subscriptions"
+"Finance/Investing" = "Brokerage statements, pension (3e pilier, PER), investment documents"
+
+"Work/Employment" = "Employment contracts, payslips, work certificates, unemployment documents"
+"Work/Projects"   = "Business and side-project paperwork: company registration, client invoices, contracts"
+
+"Education" = "Diplomas, transcripts, certificates of completion"
+"Health"    = "Medical reports, prescriptions, test results, doctor and pharmacy bills (insurance contracts go in Admin/Insurance)"
+"Learning"  = "Course material, papers, ebooks, study notes"
+"Travel"    = "Tickets, boarding passes, hotel bookings, itineraries, travel visas"
+"Personal"  = "Photos, letters, personal projects and keepsakes"
