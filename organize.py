@@ -200,6 +200,7 @@ def classify(p: Path, cfg: dict, Decision):
         messages=[{"role": "user", "content": prompt}],
         format=Decision.model_json_schema(),
         options={"temperature": 0},
+        think=False,
     )
     return Decision.model_validate_json(r.message.content)
 
