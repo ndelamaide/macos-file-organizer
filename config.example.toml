@@ -18,8 +18,11 @@ destination = "~/My Drive"
 min_confidence = 0.6
 inbox = "Inbox"
 
-# Folder names never scanned. Folders containing a .git repo, hidden folders
-# and app bundles are always skipped, so code is never touched.
+# Folders never scanned. Two kinds of entries:
+#   - a bare name ("node_modules") skips every folder with that name, anywhere
+#   - a path starting with / or ~ ("~/Documents/Archive") skips that exact folder
+# Folders containing a .git repo, hidden folders and app bundles are always skipped,
+# so code is never touched.
 exclude = ["node_modules", ".venv", "venv", "__pycache__", "Library", "Applications"]
 
 # Categories: "Folder/Subfolder" = "when to use it".

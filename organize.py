@@ -55,7 +55,8 @@ def load_config() -> dict:
         "ocr_languages": raw.get("ocr_languages", ["fr-FR", "en-US"]),
         "min_confidence": raw.get("min_confidence", 0.6),
         "inbox": raw.get("inbox", "Inbox"),
-        "exclude": set(raw.get("exclude", [])),
+        "exclude": {e for e in raw.get("exclude", []) if not e.startswith(("/", "~"))},
+        "exclude_paths": {expand(e) for e in raw.get("exclude", []) if e.startswith(("/", "~"))},
         "root": expand(raw["destination"]) if "destination" in raw else None,
     }
     if "cloud" in cfg["model"]:
@@ -87,8 +88,8 @@ def iter_files(sources: list[Path], cfg: dict, sorted_dirs: set[Path]):
     for src in sources:
         for dirpath, dirnames, filenames in os.walk(src):
             d = Path(dirpath)
-            if ".git" in dirnames or ".git" in filenames or d in sorted_dirs:
-                dirnames[:] = []  # code repo or already sorted: don't descend
+            if ".git" in dirnames or ".git" in filenames or d in sorted_dirs or d in cfg["exclude_paths"]:
+                dirnames[:] = []  # code repo, already sorted or excluded: don't descend
                 continue
             dirnames[:] = [
                 n for n in dirnames

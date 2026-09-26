@@ -41,7 +41,7 @@ Then edit `config.toml` (it's gitignored, so your settings never get committed):
 - `[categories]`: `"Folder/Subfolder" = "when to use it"`. The model can **only** pick from these, and it relies on the descriptions, so make them specific.
   Give a category its own `destination` to keep it elsewhere, e.g. identity documents in a local-only folder.
 - `min_confidence` / `inbox`: files the model is unsure about go to the inbox folder instead of being forced into a category.
-- `exclude`: folder names never scanned.
+- `exclude`: folders never scanned. A bare name (`"node_modules"`) skips every folder with that name; a path starting with `/` or `~` (`"~/Documents/Archive"`) skips that exact folder and everything inside it.
 - `model`, `max_chars`, `ocr_languages`: model and text-extraction settings. Cloud models are refused.
 
 ## Run
