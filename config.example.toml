@@ -67,9 +67,8 @@ date_precision = "day"
 #                    description, date, date_precision and filename.
 # Resulting path: <category>/<group>/<subfolder>/<filename>
 
-[categories."Identity"]
+[categories."Private/Identity"]
 description = "Passport, ID card, driving licence, residence permit, birth certificate"
-destination = "~/Documents/Private/Identity"
 date = "the issue date (date de délivrance)"
 
 [categories."Admin/Taxes-FR"]
