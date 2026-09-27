@@ -67,9 +67,15 @@ date_precision = "day"
 #                    description, date, date_precision and filename.
 # Resulting path: <category>/<group>/<subfolder>/<filename>
 
-[categories."Private/Identity"]
+[categories."Identity"]
 description = "Passport, ID card, driving licence, residence permit, birth certificate"
 date = "the issue date (date de délivrance)"
+
+[categories."Identity".subfolders.CH]
+description = "Any identity documents related to Switzerland"
+
+[categories."Identity".subfolders.FR]
+description = "Any identity documents related to France"
 
 [categories."Admin/Taxes-FR"]
 description = "French taxes: déclaration de revenus, avis d'imposition, taxe foncière, taxe d'habitation"
@@ -93,6 +99,14 @@ date_precision = "year"
 [categories."Health"]
 description = "Medical reports, prescriptions, test results, doctor and pharmacy bills (insurance contracts go in Admin/Insurance)"
 date = "the date of the consultation, test or treatment"
+
+[categories."Health".subfolders.Prescriptions]
+description = "Prescriptions for meds or treatments"
+date = "the date when the prescription was written"
+
+[categories."Health".subfolders.Results]
+description = "Results of physical exams, scans, bloodwork"
+date = "the date when the exam was taken or results given"
 
 [categories."Travel"]
 description = "Tickets, boarding passes, hotel bookings, itineraries, travel visas"
