@@ -25,31 +25,119 @@ inbox = "Inbox"
 # so code is never touched.
 exclude = ["node_modules", ".venv", "venv", "__pycache__", "Library", "Applications"]
 
-# Categories: "Folder/Subfolder" = "when to use it".
+# ---- File names ----
+# Files are renamed from a template. Placeholders: {date}, {title}, {group}, {subfolder}.
+#   {date}  = the date that matters for that kind of document, read from its content
+#             (never the file's creation date). Left out if the document doesn't show it.
+#   {title} = a few words saying what the document is, written by the model.
+# Categories and subfolders can override all three settings below.
+filename = "{date}-{title}"
+# Language for {title}. Empty = the document's own language.
+title_language = ""
+# Default date rule and precision ("year", "month" or "day"), used when a category doesn't set its own.
+date = "the date the document is about or was issued (e.g. invoice date, letter date)"
+date_precision = "day"
+
+# ---- Categories ----
+# "Folder/Subfolder" = "when to use it".
 # The model can only pick from these, and the descriptions are what it goes by:
 # make them specific, and say which folder wins in borderline cases.
-# Add a destination to send a category somewhere other than the root,
-# e.g. to keep sensitive documents off Google Drive.
+# Categories with more settings (date rules, grouping…) use the [categories."…"] form further down.
 [categories]
-"Identity" = { description = "Passport, ID card, driving licence, residence permit, birth certificate", destination = "~/Documents/Private/Identity" }
-
-"Admin/Taxes-FR"      = "French taxes: déclaration de revenus, avis d'imposition, taxe foncière, taxe d'habitation"
-"Admin/Taxes-CH"      = "Swiss taxes: déclaration d'impôt, impôt à la source, salary tax certificates"
-"Admin/Government-FR" = "Other French administration: préfecture, mairie, CAF, URSSAF, official letters"
-"Admin/Government-CH" = "Other Swiss administration: commune, cantonal offices, AVS, official letters"
-"Admin/Insurance"     = "Insurance contracts and claims: health insurance (LAMal, mutuelle), home, car, liability"
+"Admin/Government-FR" = "Other French administration: préfecture, mairie, CAF, URSSAF, France Travail, official letters"
+"Admin/Government-CH" = "Other Swiss administration: commune, cantonal offices, AVS, unemployment fund (caisse de chômage), official letters"
 "Admin/Housing"       = "Leases, rent, utilities, internet and phone contracts"
 "Admin/Vehicle"       = "Car registration (carte grise), purchase, maintenance, fines"
+"Finance/Investing"   = "Brokerage statements, pension (3e pilier, PER), investment documents"
+"Work/Projects"       = "Business and side-project paperwork: company registration, client invoices, contracts"
+"Learning"            = "Course material, papers, ebooks, study notes"
+"Personal"            = "Photos, letters, personal projects and keepsakes"
 
-"Finance/Banking"   = "Bank and card statements, account opening or closing documents"
-"Finance/Invoices"  = "Receipts and invoices for purchases, warranties, subscriptions"
-"Finance/Investing" = "Brokerage statements, pension (3e pilier, PER), investment documents"
+# ---- Categories with their own settings ----
+#   description    = when to use it (required)
+#   destination    = keep this category somewhere other than the root, e.g. off Google Drive
+#   date           = which date to use in the filename for this kind of document
+#   date_precision = "year", "month" or "day"
+#   filename       = filename template, e.g. "{date}-payslip"
+#   group_by       = one folder per <thing> read from the document (employer, bank…).
+#                    Existing folders are reused, so "Acme SA" and "ACME" end up in the same one.
+#                    Rename a group folder by hand and future files follow the new name.
+#   subfolders     = fixed document types inside each group: a list of names, or one
+#                    [categories."…".subfolders.Name] table each, which can also set
+#                    description, date, date_precision and filename.
+# Resulting path: <category>/<group>/<subfolder>/<filename>
 
-"Work/Employment" = "Employment contracts, payslips, work certificates, unemployment documents"
-"Work/Projects"   = "Business and side-project paperwork: company registration, client invoices, contracts"
+[categories."Identity"]
+description = "Passport, ID card, driving licence, residence permit, birth certificate"
+destination = "~/Documents/Private/Identity"
+date = "the issue date (date de délivrance)"
 
-"Education" = "Diplomas, transcripts, certificates of completion"
-"Health"    = "Medical reports, prescriptions, test results, doctor and pharmacy bills (insurance contracts go in Admin/Insurance)"
-"Learning"  = "Course material, papers, ebooks, study notes"
-"Travel"    = "Tickets, boarding passes, hotel bookings, itineraries, travel visas"
-"Personal"  = "Photos, letters, personal projects and keepsakes"
+[categories."Admin/Taxes-FR"]
+description = "French taxes: déclaration de revenus, avis d'imposition, taxe foncière, taxe d'habitation"
+date = "the tax year the document is about (e.g. 'revenus 2024' -> 2024), not the date it was sent"
+date_precision = "year"
+
+[categories."Admin/Taxes-CH"]
+description = "Swiss taxes: déclaration d'impôt, impôt à la source, salary tax certificates"
+date = "the tax year the document is about (période fiscale), not the date it was sent"
+date_precision = "year"
+
+[categories."Finance/Invoices"]
+description = "Receipts and invoices for purchases, warranties, subscriptions"
+date = "the invoice or purchase date"
+
+[categories."Education"]
+description = "Diplomas, transcripts, certificates of completion"
+date = "the date the diploma or certificate was awarded"
+date_precision = "year"
+
+[categories."Health"]
+description = "Medical reports, prescriptions, test results, doctor and pharmacy bills (insurance contracts go in Admin/Insurance)"
+date = "the date of the consultation, test or treatment"
+
+[categories."Travel"]
+description = "Tickets, boarding passes, hotel bookings, itineraries, travel visas"
+date = "the date of travel or check-in (not the booking date)"
+
+[categories."Finance/Banking"]
+description = "Bank and card statements, account opening or closing documents"
+group_by = "bank"
+date = "the end of the statement period, or the letter date for other documents"
+date_precision = "month"
+
+[categories."Admin/Insurance"]
+description = "Insurance contracts and claims: health insurance (LAMal, mutuelle), home, car, liability"
+group_by = "insurer"
+
+[categories."Admin/Insurance".subfolders.Contracts]
+description = "Policy, contract, yearly premium notice (avis de prime), termination"
+date = "the start date of the policy or of the period the premium covers"
+
+[categories."Admin/Insurance".subfolders.Claims]
+description = "Claim, reimbursement statement (décompte de prestations)"
+date = "the date of the event or treatment being reimbursed"
+
+[categories."Admin/Insurance".subfolders.Invoices]
+description = "Premium invoice or payment reminder"
+date = "the invoice date"
+
+[categories."Work/Employment"]
+description = "Employment contracts and amendments, payslips, work certificates, job references from a specific employer"
+group_by = "employer"
+
+[categories."Work/Employment".subfolders.Contracts]
+description = "Employment contract, amendment (avenant), resignation or termination letter"
+date = "the start date for a contract, otherwise the date the letter was signed"
+
+[categories."Work/Employment".subfolders.Payslips]
+description = "Monthly payslip (fiche de paie, bulletin de salaire, décompte de salaire)"
+date = "the pay period: the month the salary is for, NOT the payment or print date"
+date_precision = "month"
+filename = "{date}-payslip"
+
+[categories."Work/Employment".subfolders.Certificates]
+description = "Work certificate, reference letter, attestation employeur, certificat de travail"
+date = "the issue date"
+
+[categories."Work/Employment".subfolders.Other]
+description = "Anything else from this employer"

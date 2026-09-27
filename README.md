@@ -40,6 +40,29 @@ Then edit `config.toml` (it's gitignored, so your settings never get committed):
 - `destination`: root folder for sorted files, typically your mirrored Google Drive folder. Each category becomes a subfolder.
 - `[categories]`: `"Folder/Subfolder" = "when to use it"`. The model can **only** pick from these, and it relies on the descriptions, so make them specific.
   Give a category its own `destination` to keep it elsewhere, e.g. identity documents in a local-only folder.
+- Grouping, per category:
+  - `group_by = "employer"` makes one folder per employer (or bank, insurer…), named from the document. Existing folders are reused, and names are normalized so `Acme SA` and `ACME` land in the same folder. Rename a group folder by hand and future files follow.
+  - `subfolders` makes fixed document-type folders inside each group, e.g. `Contracts`, `Payslips`.
+- File names and dates, at the top level, per category or per subfolder:
+  - `filename`: a template with `{date}`, `{title}`, `{group}`, `{subfolder}`. Default `{date}-{title}`.
+  - `date`: **which** date matters for that kind of document, in plain words. It's read from the content, never from the file's creation date, and left out of the name if the document doesn't show it.
+  - `date_precision`: `year`, `month` or `day`.
+  - `title_language`: language for `{title}` (default: the document's own language).
+
+  ```toml
+  [categories."Work/Employment"]
+  description = "Employment contracts, payslips, work certificates"
+  group_by = "employer"
+
+  [categories."Work/Employment".subfolders.Payslips]
+  description = "Monthly payslip (fiche de paie, bulletin de salaire)"
+  date = "the pay period: the month the salary is for, not the payment or print date"
+  date_precision = "month"
+  filename = "{date}-payslip"
+  # -> Work/Employment/Acme/Payslips/2024-03-payslip.pdf
+  ```
+
+  `config.example.toml` has date rules for taxes (tax year), bank statements (statement period), travel (travel date), insurance and more.
 - `min_confidence` / `inbox`: files the model is unsure about go to the inbox folder instead of being forced into a category.
 - `exclude`: folders never scanned. A bare name (`"node_modules"`) skips every folder with that name; a path starting with `/` or `~` (`"~/Documents/Archive"`) skips that exact folder and everything inside it.
 - `model`, `max_chars`, `ocr_languages`: model and text-extraction settings. Cloud models are refused.
@@ -63,7 +86,17 @@ uv run organize.py apply runs/plan-20260926-165700.csv
 
 Use `--into <folder>` to override the destination for one run, e.g. to test on a scratch folder.
 
+Use `--refresh` to re-date and rename files you've already sorted, e.g. after changing date rules or filename templates:
+
+```bash
+uv run organize.py plan "~/My Drive" --refresh
+```
+
+Sorted files keep their category (the folder they're in); only their group, subfolder, date and name are recomputed. Files in the Inbox are re-classified from scratch. Files that are already right are left out of the plan.
+
 Every run gets its own timestamped file in `runs/` (next to the script), so nothing is ever overwritten: `plan-<timestamp>.csv` for each plan and `undo-<timestamp>.csv` for each apply that moved something.
+
+Each file takes two model calls: one for the category, then one for the details (date, title, group, subfolder) with the rules for that category.
 
 ### Reviewing a plan
 
@@ -72,6 +105,8 @@ Every run gets its own timestamped file in `runs/` (next to the script), so noth
 | `action` | `move`, `duplicate` or `skip`. Only `move` rows are executed; change a row to `skip` to leave a file alone. |
 | `src` / `dest` | Current path and proposed new path. Edit `dest` freely. |
 | `category` | Where the file is going (`Inbox` if confidence was low). |
+| `group` / `subfolder` | The employer, bank… and document type, for grouped categories. |
+| `date` | The document date used in the name. Empty means none was found: check these. |
 | `suggested` | The model's first choice, handy for accepting Inbox files. |
 | `confidence` | The model's confidence, 0 to 1. |
 | `note` | Why a row was skipped, or which file a duplicate matches. |
@@ -81,7 +116,8 @@ Each apply writes its moves to its own `runs/undo-<timestamp>.csv` (`new_path, o
 
 ## What gets scanned
 
-- **Skipped entirely:** folders containing a `.git` repo (code belongs on GitHub, not in this tree), hidden files and folders, app bundles, names listed in `exclude`, and category folders that are already sorted. Running it again only picks up new files.
+- **Skipped entirely:** folders containing a `.git` repo (code belongs on GitHub, not in this tree), hidden files and folders, app bundles, names listed in `exclude`, and category folders that are already sorted. Running it again only picks up new files (unless you pass `--refresh`).
+- **Regrouping:** the one exception is grouped categories. If you add `group_by` or `subfolders` to a category after sorting into it, the next `plan` also picks up the files sitting directly in that category folder (e.g. `Work/Employment/payslip.pdf`) and moves them into `<group>/<subfolder>/`, with a new name. Their category is kept. This only happens when the category folder is inside one of the folders you scan, and they're marked `already sorted` in the plan.
 - **Duplicates:** files with identical content (SHA-256) are marked `duplicate` and never moved or deleted. Deal with them yourself.
 
 | Type | How it's read |
