@@ -23,13 +23,15 @@ To check a change end-to-end, run `plan` against a scratch copy of some files wi
 
 ## Architecture
 
-**Two phases, joined by a CSV.** `plan` does all the reading and model calls and writes a CSV (`PLAN_FIELDS`); the user edits it by hand; `apply` only reads `action`/`src`/`dest` and moves files. `apply` never loads the config or calls the model. Any new per-file information must go through the plan CSV.
+**Two phases, joined by a CSV.** `plan` does all the reading and model calls and writes a CSV (`PLAN_FIELDS`); the user edits it by hand; `apply` only reads `action`/`src`/`dest` and moves `move` rows; every other action (`keep`, `duplicate`, `skip`) is informational. `apply` never loads the config or calls the model. Any new per-file information must go through the plan CSV.
 
 **Config normalization (`load_config`).** The TOML allows shorthand: a category can be a string or a table, `subfolders` can be a list, a table of strings, or a table of tables. Everything is normalized into one dict shape up front; the rest of the code assumes that shape. The inbox category is always added. Naming settings (`date`, `date_precision`, `filename`) are layered subfolder → category → top level, looked up with `resolve()`. Config errors `sys.exit` with a message naming where in the file the problem is.
 
 **Two model calls per file**, both with `temperature=0`, `think=False`, and structured output from a Pydantic model built at runtime with `create_model`:
-1. `classify`: category constrained to a `Literal` of the configured category names, plus confidence. Below `min_confidence` → inbox (the model's pick is kept in `suggested`).
+1. `classify`: category constrained to a `Literal` of the configured category names, plus confidence. Below `min_confidence` → inbox (the model's pick is kept in `suggested`). For new files inside `destination` but not at its top level, the schema also has `folder_fits`: if true, the file gets a `keep` row (left in place, `dest` = its category folder in case the user flips it to `move`) and `describe` is skipped.
 2. `describe`: fields depend on the chosen category (`group` only if `group_by`, `subfolder` as a `Literal` only if `subfolders`, always `date` and `title`). The date rule shown to the model is built from the per-category/per-subfolder `date` descriptions.
+
+Both prompts include the filename and the folder path (`folder_label`, relative to the scanned source's parent) as hints; `describe` is told to reuse a descriptive current filename as the title.
 
 Model output is then post-processed rather than trusted: `normalize_date` drops anything unparsable or implausible ("no date is better than a wrong one"), `clean_group` strips legal suffixes, `match_group` folds names onto existing group folders (accent/case-insensitive, prefix, then fuzzy match), and `safe_name` produces ASCII kebab-case filenames. Known groups come from folders on disk (`existing_groups`) plus names seen earlier in the same run, and are fed back into the `describe` prompt.
 

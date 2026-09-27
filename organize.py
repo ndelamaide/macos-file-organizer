@@ -286,30 +286,48 @@ def ask(prompt: str, schema, cfg: dict):
     return schema.model_validate_json(r.message.content)
 
 
-def file_block(p: Path, text: str) -> str:
-    return f"Filename: {p.name}\nContent:\n{text or '(no readable content)'}"
+def folder_label(p: Path, sources: list[Path]) -> str:
+    """Where the file sits, from the scanned folder's name down: "Downloads/Taxes 2023"."""
+    for s in sources:
+        if p.is_relative_to(s):
+            return str(p.parent.relative_to(s.parent))
+    return p.parent.name
 
 
-def make_category_model(cfg: dict):
-    return create_model(
-        "Category",
-        category=(Literal[tuple(cfg["categories"])], ...),
-        confidence=(float, ...),
-    )
+def file_block(p: Path, text: str, folder: str) -> str:
+    return f"Filename: {p.name}\nFolder: {folder}\nContent:\n{text or '(no readable content)'}"
 
 
-def classify(p: Path, text: str, cfg: dict, Category):
-    """Step 1: which category."""
+def make_category_model(cfg: dict, folder_check: bool = False):
+    fields = {"category": (Literal[tuple(cfg["categories"])], ...), "confidence": (float, ...)}
+    if folder_check:
+        fields["folder_fits"] = (bool, ...)
+    return create_model("Category", **fields)
+
+
+FOLDER_CHECK = (
+    "Also say whether the file's current folder already fits it (folder_fits). True only if that folder "
+    "is a specific, meaningful home for this file: named after its project, school, topic, organization "
+    "or event, and the file clearly belongs there. False for generic or catch-all folders (Downloads, "
+    "Desktop, Documents, Scans, Misc, Old, Untitled, New folder) or if the file looks misplaced.\n"
+)
+
+
+def classify(p: Path, text: str, folder: str, cfg: dict, Category):
+    """Step 1: which category, and (with a folder_fits field) whether the file can stay where it is."""
     menu = "\n".join(f"- {name}: {c['description']}" for name, c in cfg["categories"].items())
     prompt = (
         "You sort personal files (documents may be in French or English). "
         f"Pick the single best category:\n{menu}\n\n"
-        "Give your confidence from 0 to 1.\n\n" + file_block(p, text)
+        "The filename and folder are hints too: the file may already be named or filed sensibly.\n"
+        "Give your confidence from 0 to 1.\n"
+        + (FOLDER_CHECK if "folder_fits" in Category.model_fields else "")
+        + "\n" + file_block(p, text, folder)
     )
     return ask(prompt, Category, cfg)
 
 
-def describe(p: Path, text: str, cat: str, cfg: dict, known: list[str]) -> dict:
+def describe(p: Path, text: str, folder: str, cat: str, cfg: dict, known: list[str]) -> dict:
     """Step 2, now that the category is known: group, subfolder, the date that matters
     for this kind of document, and a short title."""
     c = cfg["categories"][cat]
@@ -352,13 +370,15 @@ def describe(p: Path, text: str, cat: str, cfg: dict, known: list[str]) -> dict:
     lang = f"in {cfg['title_language']}" if cfg["title_language"] else "in the document's language"
     avoid = f", the {c['group_by']}" if c["group_by"] else ""
     asks.append(
-        f"- title: 2 to 6 words saying what the document is, {lang}. No date, no file extension, "
-        f"don't repeat the category{avoid}. E.g. \"avis d'imposition\", \"bank statement\", \"train ticket geneva paris\"."
+        f"- title: 2 to 6 words saying what the document is, {lang}. If the current filename already says "
+        "that clearly (e.g. \"Rapport de stage Nestlé\", not \"scan_0034\" or \"document (3)\"), reuse its "
+        f"wording. No date, no file extension, don't repeat the category{avoid}. "
+        "E.g. \"avis d'imposition\", \"bank statement\", \"train ticket geneva paris\"."
     )
 
     prompt = (
         f'This file was filed under "{cat}" ({c["description"]}). Answer:\n'
-        + "\n".join(asks) + "\n\n" + file_block(p, text)
+        + "\n".join(asks) + "\n\n" + file_block(p, text, folder)
     )
     r = ask(prompt, create_model("Details", **fields), cfg)
 
@@ -486,14 +506,15 @@ def latest_plan() -> Path | None:
 def plan(sources: list[Path], cfg: dict, refresh: bool):
     if cfg["root"] is None:
         sys.exit("Set 'destination' in config.toml or pass --into")
-    Category = make_category_model(cfg)
+    Category, CategoryInPlace = make_category_model(cfg), make_category_model(cfg, folder_check=True)
     sorted_dirs = {category_dir(cfg, c) for c in cfg["categories"]}
     # (file, None) = new file; (file, category) = already-sorted file getting another pass
     items = [(f, None) for f in iter_files(sources, cfg, sorted_dirs)]
     items += list(iter_sorted(sources, cfg, sorted_dirs, refresh))
     finder = DuplicateFinder()
     index_sorted(sorted_dirs, finder)
-    counts = {"move": 0, "resort": 0, "unchanged": 0, "duplicate": 0, "skip": 0, "inbox": 0, "undated": 0}
+    counts = {"move": 0, "keep": 0, "resort": 0, "unchanged": 0, "duplicate": 0, "skip": 0,
+              "inbox": 0, "undated": 0}
     groups: dict[str, list[str]] = {}  # category -> group names seen on disk or in this run
     plan_path = new_run_file("plan")
 
@@ -514,24 +535,37 @@ def plan(sources: list[Path], cfg: dict, refresh: bool):
                     counts["duplicate"] += 1
                     continue
 
+            folder = folder_label(f, sources)
+            # a new file in a hand-made folder of the destination may stay there, if the folder fits it
+            may_stay = sorted_cat is None and f.parent != cfg["root"] and f.is_relative_to(cfg["root"])
+            fits = False
             try:
                 text = extract_text(f, cfg)[: cfg["max_chars"]]
                 if sorted_cat and sorted_cat != cfg["inbox"]:  # keep the category you already accepted
                     cat, suggested, confidence = sorted_cat, sorted_cat, ""
                 else:  # new file, or an Inbox file getting a second chance
-                    d = classify(f, text, cfg, Category)
+                    d = classify(f, text, folder, cfg, CategoryInPlace if may_stay else Category)
                     cat = d.category if d.confidence >= cfg["min_confidence"] else cfg["inbox"]
                     suggested, confidence = d.category, round(d.confidence, 2)
-                known = groups.setdefault(cat, existing_groups(cfg, cat))
-                info = describe(f, text, cat, cfg, known)
-                if info["group"] and info["group"] not in known:
-                    known.append(info["group"])
+                    fits = getattr(d, "folder_fits", False)
+                if not fits:
+                    known = groups.setdefault(cat, existing_groups(cfg, cat))
+                    info = describe(f, text, folder, cat, cfg, known)
+                    if info["group"] and info["group"] not in known:
+                        known.append(info["group"])
             except Exception as e:
                 w.writerow(row | {"action": "skip", "note": f"model error: {e}"}); counts["skip"] += 1
                 continue
 
             c = cfg["categories"][cat]
             ext = f.suffix.lower()
+            if fits:  # dest = where it would go, in case you set the action to move
+                stuck = ext in GOOGLE_STUBS and c["destination"]
+                w.writerow(row | {"action": "keep", "category": cat, "suggested": suggested,
+                                  "confidence": confidence, "dest": "" if stuck else category_dir(cfg, cat) / f.name,
+                                  "note": "current folder fits: left in place"})
+                counts["keep"] += 1
+                continue
             name = f.name if ext in GOOGLE_STUBS else build_name(cfg, cat, info, ext)
             counts["inbox"] += cat == cfg["inbox"]
             counts["undated"] += not info["date"]
@@ -557,7 +591,8 @@ def plan(sources: list[Path], cfg: dict, refresh: bool):
 
     print(
         f"\nWrote {plan_path}:\n"
-        f"  {counts['move']} new files to move ({counts['inbox']} to {cfg['inbox']})\n"
+        f"  {counts['move']} new files to move ({counts['inbox']} to {cfg['inbox']}), "
+        f"{counts['keep']} left in place (their folder fits)\n"
         f"  {counts['resort']} sorted files to move or rename, {counts['unchanged']} already right\n"
         f"  {counts['duplicate']} duplicates, {counts['skip']} skipped, "
         f"{counts['undated']} without a document date\n"

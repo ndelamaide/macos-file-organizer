@@ -23,7 +23,7 @@ inbox = "Inbox"
 #   - a path starting with / or ~ ("~/Documents/Archive") skips that exact folder
 # Folders containing a .git repo, hidden folders and app bundles are always skipped,
 # so code is never touched.
-exclude = ["node_modules", ".venv", "venv", "__pycache__", "Library", "Applications"]
+exclude = ["node_modules", "venv", "__pycache__", "Library", "Applications"]
 
 # ---- File names ----
 # Files are renamed from a template. Placeholders: {date}, {title}, {group}, {subfolder}.
@@ -77,6 +77,9 @@ description = "Any identity documents related to Switzerland"
 [categories."Identity".subfolders.FR]
 description = "Any identity documents related to France"
 
+[categories."Identity".subfolders.Other]
+description = "Identity documents from any other country"
+
 [categories."Admin/Taxes-FR"]
 description = "French taxes: déclaration de revenus, avis d'imposition, taxe foncière, taxe d'habitation"
 date = "the tax year the document is about (e.g. 'revenus 2024' -> 2024), not the date it was sent"
@@ -107,6 +110,13 @@ date = "the date when the prescription was written"
 [categories."Health".subfolders.Results]
 description = "Results of physical exams, scans, bloodwork"
 date = "the date when the exam was taken or results given"
+
+[categories."Health".subfolders.Bills]
+description = "Doctor, hospital and pharmacy bills and receipts (insurance reimbursements go in Admin/Insurance)"
+date = "the date of the consultation or purchase, not the payment due date"
+
+[categories."Health".subfolders.Records]
+description = "Medical reports, vaccination records, doctor letters and anything else"
 
 [categories."Travel"]
 description = "Tickets, boarding passes, hotel bookings, itineraries, travel visas"

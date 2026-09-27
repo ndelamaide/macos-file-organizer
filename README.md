@@ -97,13 +97,14 @@ Sorted files keep their category (the folder they're in); only their group, subf
 Every run gets its own timestamped file in `runs/` (next to the script), so nothing is ever overwritten: `plan-<timestamp>.csv` for each plan and `undo-<timestamp>.csv` for each apply that moved something.
 
 Each file takes two model calls: one for the category, then one for the details (date, title, group, subfolder) with the rules for that category.
+The model sees the file's current name and folder as well as its content. A name that already says what the document is (`Rapport de stage Nestlé.pdf`) is reused for `{title}` instead of being rewritten; unclear names (`scan_0034.pdf`) get a new title.
 
 ### Reviewing a plan
 
 | Column | Meaning |
 |---|---|
-| `action` | `move`, `duplicate` or `skip`. Only `move` rows are executed; change a row to `skip` to leave a file alone. |
-| `src` / `dest` | Current path and proposed new path. Edit `dest` freely. |
+| `action` | `move`, `keep`, `duplicate` or `skip`. Only `move` rows are executed; change a row to `skip` to leave a file alone, or a `keep` row to `move` to sort it anyway. |
+| `src` / `dest` | Current path and proposed new path. Edit `dest` freely. For `keep` rows, `dest` is where the file would go in its category. |
 | `category` | Where the file is going (`Inbox` if confidence was low). |
 | `group` / `subfolder` | The employer, bank… and document type, for grouped categories. |
 | `date` | The document date used in the name. Empty means none was found: check these. |
@@ -118,6 +119,7 @@ Each apply writes its moves to its own `runs/undo-<timestamp>.csv` (`new_path, o
 
 - **Skipped entirely:** folders containing a `.git` repo (code belongs on GitHub, not in this tree), hidden files and folders, app bundles, names listed in `exclude`, and category folders that are already sorted. Running it again only picks up new files (unless you pass `--refresh`).
 - **Regrouping:** the one exception is grouped categories. If you add `group_by` or `subfolders` to a category after sorting into it, the next `plan` also picks up the files sitting directly in that category folder (e.g. `Work/Employment/payslip.pdf`) and moves them into `<group>/<subfolder>/`, with a new name. Their category is kept. This only happens when the category folder is inside one of the folders you scan, and they're marked `already sorted` in the plan.
+- **Left in place:** files in a folder you organized yourself inside `destination` (e.g. `My Drive/EPFL/Master/Machine Learning/`) stay there when the model judges that folder a meaningful home for them. They're marked `keep` in the plan. Generic folders (`Documents`, `Scans`, `Misc`…) shouldn't count, the top of `destination` never does, and files outside `destination` (Downloads, Desktop…) are always sorted. Kept files are checked again on every run; add their folder to `exclude` to skip them for good.
 - **Duplicates:** files with identical content (SHA-256) are marked `duplicate` and never moved or deleted. Deal with them yourself.
 
 | Type | How it's read |
