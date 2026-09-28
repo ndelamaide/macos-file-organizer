@@ -92,7 +92,7 @@ Use `--refresh` to re-date and rename files you've already sorted, e.g. after ch
 uv run organize.py plan "~/My Drive" --refresh
 ```
 
-Sorted files keep their category (the folder they're in); only their group, subfolder, date and name are recomputed. Files in the Inbox are re-classified from scratch. Files that are already right are left out of the plan.
+Sorted files keep their category (the folder they're in); only their group, subfolder, date and name are recomputed. Files in the Inbox are re-classified from scratch. Files that are already right, including numbered copies such as `name-2.pdf` next to `name.pdf`, are left out of the plan.
 
 Every run gets its own timestamped file in `runs/` (next to the script), so nothing is ever overwritten: `plan-<timestamp>.csv` for each plan and `undo-<timestamp>.csv` for each apply that moved something.
 

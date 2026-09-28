@@ -583,10 +583,13 @@ def plan(sources: list[Path], cfg: dict, refresh: bool):
             for part in (info["group"], info["subfolder"]):
                 if part:
                     folder = folder / part
-            if folder / name == f:
+            target = folder / name
+            # name-2.pdf is where apply puts a file whose target name is taken, so it's right too
+            if target == f or (f.parent == folder and f.suffix == target.suffix
+                               and re.fullmatch(re.escape(target.stem) + r"-\d+", f.stem)):
                 counts["unchanged"] += 1
                 continue
-            w.writerow(row | {"action": "move", "dest": folder / name})
+            w.writerow(row | {"action": "move", "dest": target})
             counts["resort" if sorted_cat else "move"] += 1
 
     print(
@@ -615,11 +618,13 @@ def apply(plan_path: Path | None):
                 if row["action"] != "move" or not row["dest"]:
                     continue
                 src, dest = Path(row["src"]), Path(row["dest"])
-                if not src.exists() or src == dest:
+                if not src.exists():
                     continue
                 base, n = dest, 1
-                while dest.exists():  # never overwrite
+                while dest.exists() and dest != src:  # never overwrite
                     dest = base.with_stem(f"{base.stem}-{n}"); n += 1
+                if dest == src:  # src already has the name or one of its -N variants
+                    continue
                 if log is None:  # create the undo log only once something moves
                     undo_path = new_run_file("undo")
                     undo_fh = open(undo_path, "x", newline="")
