@@ -43,9 +43,10 @@ Then edit `config.toml` (it's gitignored, so your settings never get committed):
 - Grouping, per category:
   - `group_by = "employer"` makes one folder per employer (or bank, insurer…), named from the document. Existing folders are reused, and names are normalized so `Acme SA` and `ACME` land in the same folder. Rename a group folder by hand and future files follow.
   - `subfolders` makes fixed document-type folders inside each group, e.g. `Contracts`, `Payslips`.
+  - A category can sit inside another one's folder, e.g. `Finance/Investing/Retirement/Pillar2` next to the broker folders of a grouped `Finance/Investing`. Folders leading to a category are never taken as groups.
 - File names and dates, at the top level, per category or per subfolder:
   - `filename`: a template with `{date}`, `{title}`, `{group}`, `{subfolder}`. Default `{date}-{title}`.
-  - `date`: **which** date matters for that kind of document, in plain words. It's read from the content, never from the file's creation date, and left out of the name if the document doesn't show it.
+  - `date`: **which** date matters for that kind of document, in plain words. It's read from the content, never from the file's creation date, and left out of the name if the document doesn't show it. A January 1st date the text doesn't actually show is cut back to the year, since that's usually the model padding a bare year.
   - `date_precision`: `year`, `month` or `day`.
   - `title_language`: language for `{title}` (default: the document's own language).
 
@@ -92,7 +93,7 @@ Use `--refresh` to re-date and rename files you've already sorted, e.g. after ch
 uv run organize.py plan "~/My Drive" --refresh
 ```
 
-Sorted files keep their category (the folder they're in); only their group, subfolder, date and name are recomputed. Files in the Inbox are re-classified from scratch. Files that are already right, including numbered copies such as `name-2.pdf` next to `name.pdf`, are left out of the plan.
+Sorted files keep their category (the folder they're in), and the group and subfolder they're already in: if you moved a payslip to another employer's folder by hand, it stays there. Only what's missing is asked of the model (e.g. the subfolder of a file sitting directly in its group folder), and the date and name are recomputed. A date already in the name is kept when the model finds none, and a file already in its final folder keeps its title unless that title says nothing (`document-3`, `scan`). Files in the Inbox are re-classified from scratch. Files that are already right, including numbered copies such as `name-2.pdf` next to `name.pdf`, are left out of the plan.
 
 Every run gets its own timestamped file in `runs/` (next to the script), so nothing is ever overwritten: `plan-<timestamp>.csv` for each plan and `undo-<timestamp>.csv` for each apply that moved something.
 
@@ -117,7 +118,7 @@ Each apply writes its moves to its own `runs/undo-<timestamp>.csv` (`new_path, o
 
 ## What gets scanned
 
-- **Skipped entirely:** folders containing a `.git` repo (code belongs on GitHub, not in this tree), hidden files and folders, app bundles, names listed in `exclude`, and category folders that are already sorted. Running it again only picks up new files (unless you pass `--refresh`).
+- **Skipped entirely:** folders containing a `.git` repo (code belongs on GitHub, not in this tree), hidden files and folders, folder metadata files (`Icon`, `desktop.ini`, `Thumbs.db`), app bundles, names listed in `exclude`, and category folders that are already sorted. Running it again only picks up new files (unless you pass `--refresh`).
 - **Regrouping:** the one exception is grouped categories. If you add `group_by` or `subfolders` to a category after sorting into it, the next `plan` also picks up the files sitting directly in that category folder (e.g. `Work/Employment/payslip.pdf`) and moves them into `<group>/<subfolder>/`, with a new name. Their category is kept. This only happens when the category folder is inside one of the folders you scan, and they're marked `already sorted` in the plan.
 - **Left in place:** files in a folder you organized yourself inside `destination` (e.g. `My Drive/EPFL/Master/Machine Learning/`) stay there when the model judges that folder a meaningful home for them. They're marked `keep` in the plan. Generic folders (`Documents`, `Scans`, `Misc`…) shouldn't count, the top of `destination` never does, and files outside `destination` (Downloads, Desktop…) are always sorted. Kept files are checked again on every run; add their folder to `exclude` to skip them for good.
 - **Duplicates:** files with identical content (SHA-256) are marked `duplicate` and never moved or deleted. Deal with them yourself.

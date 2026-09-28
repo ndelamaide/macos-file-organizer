@@ -38,6 +38,7 @@ IMAGE_EXT = {".png", ".jpg", ".jpeg", ".heic", ".tiff", ".tif"}
 TEXT_EXT = {".txt", ".md", ".csv", ".json"}
 GOOGLE_STUBS = {".gdoc", ".gsheet", ".gslides", ".gdraw", ".gform", ".gmap", ".gsite"}
 BUNDLES = (".app", ".photoslibrary", ".bundle", ".framework", ".pkg")
+JUNK = {"Icon\r", "desktop.ini", "Thumbs.db"}  # folder metadata (Finder custom icon, Windows), not documents
 MIN_PDF_TEXT = 50  # below this many characters, treat the PDF as a scan and OCR it
 
 DEFAULT_DATE_RULE = ("the date the document is about or was issued (e.g. invoice date, "
@@ -128,6 +129,15 @@ def resolve(cfg: dict, cat: str, sub: str, key: str):
 
 # ---- scanning ------------------------------------------------------------
 
+def visible(name: str) -> bool:
+    return not name.startswith(".") and name not in JUNK
+
+
+def holds_category(d: Path, sorted_dirs: set[Path]) -> bool:
+    """d is a category folder or leads to one (Finance/Investing/Retirement -> …/Pillier2)."""
+    return any(s.is_relative_to(d) for s in sorted_dirs)
+
+
 def warn(err: OSError):
     print(f"  ! cannot read {err.filename}: {err.strerror}", file=sys.stderr)
     if err.errno == 1:  # EPERM: macOS privacy protection
@@ -152,7 +162,7 @@ def iter_files(sources: list[Path], cfg: dict, sorted_dirs: set[Path]):
             ]
             for name in filenames:
                 f = d / name
-                if not name.startswith(".") and f not in seen:
+                if visible(name) and f not in seen:
                     seen.add(f)
                     found += 1
                     yield f
@@ -170,7 +180,8 @@ def iter_sorted(sources: list[Path], cfg: dict, sorted_dirs: set[Path], refresh:
       (e.g. Work/Employment/payslip.pdf -> Acme/Payslips/);
     - with refresh: every sorted file, to recompute its date and name.
     Only category folders inside the scanned sources are considered. Folders deeper than
-    the category's structure are yours, and left alone."""
+    the category's structure are yours, and left alone, as are folders leading to another
+    category nested inside this one."""
     for cat in cfg["categories"]:
         grouped = is_grouped(cfg, cat)
         if not (grouped or refresh):
@@ -183,7 +194,7 @@ def iter_sorted(sources: list[Path], cfg: dict, sorted_dirs: set[Path], refresh:
         found = 0
         for dirpath, dirnames, filenames in os.walk(root, onerror=warn):
             d = Path(dirpath)
-            if ".git" in dirnames or d in cfg["exclude_paths"] or (d != root and d in sorted_dirs):
+            if ".git" in dirnames or d in cfg["exclude_paths"] or (d != root and holds_category(d, sorted_dirs)):
                 dirnames[:] = []
                 continue
             level = len(d.relative_to(root).parts)
@@ -194,7 +205,7 @@ def iter_sorted(sources: list[Path], cfg: dict, sorted_dirs: set[Path], refresh:
             if level == depth and not refresh:
                 continue  # already in place
             for name in filenames:
-                if not name.startswith("."):
+                if visible(name):
                     found += 1
                     yield d / name, cat
         if found:
@@ -234,9 +245,10 @@ def index_sorted(sorted_dirs: set[Path], finder: DuplicateFinder):
     """Register files already in category folders, so re-runs catch copies of them."""
     for d in sorted_dirs:
         for dirpath, dirnames, filenames in os.walk(d):
-            dirnames[:] = [n for n in dirnames if not n.startswith(".")]
+            # a category nested in this one is indexed on its own
+            dirnames[:] = [n for n in dirnames if not n.startswith(".") and Path(dirpath, n) not in sorted_dirs]
             for name in filenames:
-                if not name.startswith("."):
+                if visible(name):
                     finder.add(Path(dirpath) / name)
 
 
@@ -327,13 +339,16 @@ def classify(p: Path, text: str, folder: str, cfg: dict, Category):
     return ask(prompt, Category, cfg)
 
 
-def describe(p: Path, text: str, folder: str, cat: str, cfg: dict, known: list[str]) -> dict:
+def describe(p: Path, text: str, folder: str, cat: str, cfg: dict, known: list[str],
+             placed: dict | None = None) -> dict:
     """Step 2, now that the category is known: group, subfolder, the date that matters
-    for this kind of document, and a short title."""
+    for this kind of document, and a short title. A group or subfolder in `placed` is
+    where the file already sits: it's kept, and the model isn't asked."""
     c = cfg["categories"][cat]
+    placed = placed or {}
     fields, asks = {}, []
 
-    if c["group_by"]:
+    if c["group_by"] and "group" not in placed:
         g = c["group_by"]
         fields["group"] = (str, ...)
         asks.append(
@@ -344,7 +359,7 @@ def describe(p: Path, text: str, folder: str, cat: str, cfg: dict, known: list[s
             + 'If you cannot tell, return "".'
         )
 
-    if c["subfolders"]:
+    if c["subfolders"] and "subfolder" not in placed:
         fields["subfolder"] = (Literal[tuple(c["subfolders"])], ...)
         options = "\n".join(f"  - {s}" + (f": {v['description']}" if v["description"] else "")
                             for s, v in c["subfolders"].items())
@@ -353,7 +368,9 @@ def describe(p: Path, text: str, folder: str, cat: str, cfg: dict, known: list[s
     fields["date"] = (str, ...)
     base_rule = c["date"] or cfg["naming"]["date"] or DEFAULT_DATE_RULE
     sub_rules = {s: v["date"] for s, v in c["subfolders"].items() if v["date"]}
-    if sub_rules:
+    if "subfolder" in placed:
+        rule = resolve(cfg, cat, placed["subfolder"], "date") or DEFAULT_DATE_RULE
+    elif sub_rules:
         rule = ("depends on the subfolder:\n"
                 + "\n".join(f"    - {s}: {r}" for s, r in sub_rules.items())
                 + f"\n    - otherwise: {base_rule}")
@@ -382,11 +399,11 @@ def describe(p: Path, text: str, folder: str, cat: str, cfg: dict, known: list[s
     )
     r = ask(prompt, create_model("Details", **fields), cfg)
 
-    group = ""
-    if c["group_by"]:
+    group = placed.get("group", "")
+    if c["group_by"] and not group:
         group = clean_group(getattr(r, "group", "") or "")
         group = match_group(group, known) if group else f"Unknown {c['group_by']}"
-    sub = getattr(r, "subfolder", "") or ""
+    sub = placed.get("subfolder") or getattr(r, "subfolder", "") or ""
     precision = resolve(cfg, cat, sub, "date_precision") or "day"
     return {"group": group, "subfolder": sub, "date": normalize_date(r.date, precision), "title": r.title}
 
@@ -420,6 +437,24 @@ def normalize_date(s: str, precision: str) -> str:
     return f"{y:04d}-{m:02d}-{d:02d}"
 
 
+JANUARY = r"(?:janvier|janv|january|januar|janner|jan)\.?"  # matched on fold()ed text: "Jänner" -> "janner"
+
+
+def confirm_january(d: str, text: str) -> str:
+    """A model that only knows the year tends to pad it to January 1st ("2024" -> "2024-01-01").
+    Keep a January date only if the text shows it (1 January for a day, January for a month);
+    otherwise keep just the year. Without text there's nothing to check against."""
+    if not text.strip() or not re.fullmatch(r"\d{4}-01(-01)?", d):
+        return d
+    y, yy, t = d[:4], d[2:4], fold(text)
+    day = [rf"{y}[-/.]0?1[-/.]0?1(?!\d)",                       # 2024-01-01
+           rf"(?<!\d)0?1[-/.]0?1[-/.](?:{y}|{yy})(?!\d)",       # 01.01.2024, 1/1/24
+           rf"(?<!\d)0?1(?:er|st|\.)?\s*{JANUARY}\s*{y}",       # 1er janvier 2024, 1. Januar 2024
+           rf"{JANUARY}\s*0?1(?:st)?,?\s*{y}"]                  # January 1, 2024
+    month = day + [rf"{JANUARY}\s*{y}", rf"(?<!\d)0?1[-/.]{y}", rf"{y}[-/.]0?1(?!\d)"]
+    return d if any(re.search(p, t) for p in (day if len(d) == 10 else month)) else y
+
+
 def fold(s: str) -> str:
     """Lowercase, accents removed: "Nestlé" -> "nestle"."""
     s = unicodedata.normalize("NFKD", s.casefold())
@@ -431,9 +466,27 @@ def safe_name(s: str) -> str:
     return s[:80].rstrip("-") or "file"
 
 
+GENERIC_WORDS = {"document", "doc", "scan", "file", "image", "img", "photo", "untitled", "sans", "titre",
+                 "copy", "copie", "new", "download"}
+
+
+def split_name(stem: str) -> tuple[str, str]:
+    """A sorted file's name back into date and title: "2024-03-payslip-2" -> ("2024-03", "payslip")."""
+    m = re.match(r"(\d{4}(?:-\d{2}){0,2})(?:-|$)", stem)
+    date_part, rest = (m.group(1), stem[m.end():]) if m else ("", stem)
+    return date_part, re.sub(r"-\d+$", "", rest)  # -N is apply's collision suffix
+
+
+def is_generic(title: str) -> bool:
+    """"document-3", "scan", "" say nothing about the file."""
+    return all(w in GENERIC_WORDS or w.isdigit() for w in safe_name(title).split("-"))
+
+
 def build_name(cfg: dict, cat: str, info: dict, ext: str) -> str:
     template = resolve(cfg, cat, info["subfolder"], "filename") or DEFAULT_FILENAME
-    raw = template.format_map({k: info.get(k, "") for k in TEMPLATE_FIELDS} | {"title": info["title"] or "document"})
+    # the model sometimes copies the extension from the filename: "statuts pdf", "secretjson"
+    title = re.sub(rf"[\s._-]*{re.escape(ext[1:])}$", "", info["title"] or "", flags=re.I) if ext else info["title"]
+    raw = template.format_map({k: info.get(k, "") for k in TEMPLATE_FIELDS} | {"title": title or "document"})
     return safe_name(raw) + ext
 
 
@@ -471,6 +524,20 @@ def match_group(name: str, known: list[str]) -> str:
     return by_key[close[0]] if close else name
 
 
+def placement(cfg: dict, cat: str, f: Path) -> tuple[dict, bool]:
+    """Group and subfolder a sorted file already sits in, and whether that's its full place
+    (<group>/<subfolder>). You may have put it there by hand, so it's kept."""
+    c = cfg["categories"][cat]
+    parts = f.parent.relative_to(category_dir(cfg, cat)).parts
+    depth = bool(c["group_by"]) + bool(c["subfolders"])
+    placed = {}
+    if c["group_by"] and parts:
+        placed["group"] = parts[0]
+    if c["subfolders"] and len(parts) == depth:
+        placed["subfolder"] = parts[-1]
+    return placed, len(parts) == depth
+
+
 def existing_groups(cfg: dict, cat: str) -> list[str]:
     """Group folders already on disk, so new files join them."""
     if not cfg["categories"][cat]["group_by"]:
@@ -478,7 +545,9 @@ def existing_groups(cfg: dict, cat: str) -> list[str]:
     d = category_dir(cfg, cat)
     if not d.is_dir():
         return []
-    return sorted(p.name for p in d.iterdir() if p.is_dir() and not p.name.startswith("."))
+    sorted_dirs = {category_dir(cfg, c) for c in cfg["categories"]}
+    return sorted(p.name for p in d.iterdir()
+                  if p.is_dir() and not p.name.startswith(".") and not holds_category(p, sorted_dirs))
 
 
 # ---- run files ------------------------------------------------------------
@@ -538,11 +607,12 @@ def plan(sources: list[Path], cfg: dict, refresh: bool):
             folder = folder_label(f, sources)
             # a new file in a hand-made folder of the destination may stay there, if the folder fits it
             may_stay = sorted_cat is None and f.parent != cfg["root"] and f.is_relative_to(cfg["root"])
-            fits = False
+            fits, placed, in_place = False, {}, False
             try:
                 text = extract_text(f, cfg)[: cfg["max_chars"]]
                 if sorted_cat and sorted_cat != cfg["inbox"]:  # keep the category you already accepted
                     cat, suggested, confidence = sorted_cat, sorted_cat, ""
+                    placed, in_place = placement(cfg, cat, f)
                 else:  # new file, or an Inbox file getting a second chance
                     d = classify(f, text, folder, cfg, CategoryInPlace if may_stay else Category)
                     cat = d.category if d.confidence >= cfg["min_confidence"] else cfg["inbox"]
@@ -550,9 +620,17 @@ def plan(sources: list[Path], cfg: dict, refresh: bool):
                     fits = getattr(d, "folder_fits", False)
                 if not fits:
                     known = groups.setdefault(cat, existing_groups(cfg, cat))
-                    info = describe(f, text, folder, cat, cfg, known)
+                    info = describe(f, text, folder, cat, cfg, known, placed)
                     if info["group"] and info["group"] not in known:
                         known.append(info["group"])
+                    if sorted_cat:  # another pass fixes a name, it doesn't undo it
+                        old_date, old_title = split_name(f.stem)
+                        precision = resolve(cfg, cat, info["subfolder"], "date_precision") or "day"
+                        info["date"] = info["date"] or normalize_date(old_date, precision)
+                        template = resolve(cfg, cat, info["subfolder"], "filename") or DEFAULT_FILENAME
+                        if in_place and template == DEFAULT_FILENAME and not is_generic(old_title):
+                            info["title"] = old_title
+                    info["date"] = confirm_january(info["date"], text)
             except Exception as e:
                 w.writerow(row | {"action": "skip", "note": f"model error: {e}"}); counts["skip"] += 1
                 continue
